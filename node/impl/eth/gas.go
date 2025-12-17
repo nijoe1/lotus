@@ -213,9 +213,10 @@ func (e *ethGas) EthEstimateGas(ctx context.Context, p jsonrpc.RawParams) (ethty
 		//
 		// So we re-execute the message with EthCall (well, applyMessage which contains the
 		// guts of EthCall). This will give us an ethereum specific error with revert
-		// information.
+		// information, OR a successful result for skip-sender-validation scenarios.
 		msg.GasLimit = buildconstants.BlockGasLimit
-		if _, err2 := e.applyMessage(ctx, msg, ts.Key()); err2 != nil {
+		res, err2 := e.applyMessage(ctx, msg, ts.Key())
+		if err2 != nil {
 			// If err2 is an ExecutionRevertedError, return it
 			var ed *api.ErrExecutionReverted
 			if errors.As(err2, &ed) {
@@ -223,9 +224,20 @@ func (e *ethGas) EthEstimateGas(ctx context.Context, p jsonrpc.RawParams) (ethty
 			}
 
 			// Otherwise, return the error from applyMessage with failed to estimate gas
-			err = err2
+			return ethtypes.EthUint64(0), xerrors.Errorf("failed to estimate gas: %w", err2)
 		}
 
+		// applyMessage succeeded (skip sender validation case).
+		// Use the gas used from the result and add a safety margin for gas estimation.
+		if res != nil && res.MsgRct != nil {
+			gasUsed := res.MsgRct.GasUsed
+			// Add 25% safety margin as is typical for gas estimation
+			gasWithMargin := gasUsed + gasUsed/4
+			if gasWithMargin < gasUsed { // overflow check
+				gasWithMargin = gasUsed
+			}
+			return ethtypes.EthUint64(gasWithMargin), nil
+		}
 		return ethtypes.EthUint64(0), xerrors.Errorf("failed to estimate gas: %w", err)
 	}
 
@@ -283,7 +295,10 @@ func (e *ethGas) applyMessage(ctx context.Context, msg *types.Message, tsk types
 	if err != nil {
 		return nil, xerrors.Errorf("cannot get tipset state: %w", err)
 	}
-	res, err = e.stateManager.ApplyOnStateWithGas(ctx, st, msg, ts)
+	// Use ApplyOnStateWithGasSkipSenderValidation to allow eth_call/eth_estimateGas
+	// to simulate calls from contract addresses or non-existent addresses.
+	// This matches Geth's behavior with SkipAccountChecks for RPC simulation.
+	res, err = e.stateManager.ApplyOnStateWithGasSkipSenderValidation(ctx, st, msg, ts)
 	if err != nil {
 		return nil, xerrors.Errorf("ApplyWithGasOnState failed: %w", err)
 	}

@@ -213,6 +213,9 @@ type StateManager interface {
 	CallOnState(ctx context.Context, stateCid cid.Cid, msg *types.Message, ts *types.TipSet) (*api.InvocResult, error)
 	CallWithGas(ctx context.Context, msg *types.Message, priorMsgs []types.ChainMsg, ts *types.TipSet, applyTsMessages bool) (*api.InvocResult, error)
 	ApplyOnStateWithGas(ctx context.Context, stateCid cid.Cid, msg *types.Message, ts *types.TipSet) (*api.InvocResult, error)
+	// ApplyOnStateWithGasSkipSenderValidation is like ApplyOnStateWithGas but skips sender validation,
+	// allowing eth_call/eth_estimateGas to simulate calls from contract addresses or non-existent addresses.
+	ApplyOnStateWithGasSkipSenderValidation(ctx context.Context, stateCid cid.Cid, msg *types.Message, ts *types.TipSet) (*api.InvocResult, error)
 
 	HasExpensiveForkBetween(parent, height abi.ChainEpoch) bool
 }

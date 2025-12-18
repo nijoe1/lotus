@@ -377,14 +377,9 @@ func TestEthCallWithContractMethodData(t *testing.T) {
 		0x00, 0x00, 0x00, 0x04,
 	}
 
-	// Prepare method call data for getBalance(address) - method selector
-	// getBalance() might be 0x12065fe0 for SimpleCoin
-	// We'll use a simple method call to test data handling
-	methodData := make([]byte, 4)
-	methodData[0] = 0x12
-	methodData[1] = 0x06
-	methodData[2] = 0x5f
-	methodData[3] = 0xe0
+	// Prepare arbitrary method call data to test data payload handling
+	// Using a non-existent method selector to avoid side effects
+	methodData := []byte{0xde, 0xad, 0xbe, 0xef}
 
 	blkParam := ethtypes.NewEthBlockNumberOrHashFromPredefined("latest")
 
@@ -466,12 +461,9 @@ func TestEthEstimateGasFromContractWithData(t *testing.T) {
 	// Create a target address
 	_, targetEthAddr, _ := client.EVM().NewAccount()
 
-	// Prepare some method call data
-	methodData := make([]byte, 4)
-	methodData[0] = 0x12
-	methodData[1] = 0x06
-	methodData[2] = 0x5f
-	methodData[3] = 0xe0
+	// Prepare arbitrary method call data to test data payload handling
+	// Using a non-existent method selector to avoid side effects
+	methodData := []byte{0xca, 0xfe, 0xba, 0xbe}
 
 	// Test: estimate gas with contract as sender and method data
 	blkParam := ethtypes.NewEthBlockNumberOrHashFromPredefined("latest")

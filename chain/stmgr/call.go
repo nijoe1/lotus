@@ -28,7 +28,6 @@ import (
 	"github.com/filecoin-project/lotus/chain/vm"
 )
 
-
 type execMessageStrategy int
 
 const (

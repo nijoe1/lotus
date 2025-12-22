@@ -637,6 +637,159 @@ func (vm *LegacyVM) ApplyMessage(ctx context.Context, cmsg types.ChainMsg) (*App
 	}, nil
 }
 
+func (vm *LegacyVM) ApplyMessageSkipSenderValidation(ctx context.Context, cmsg types.ChainMsg) (*ApplyRet, error) {
+	start := build.Clock.Now()
+	ctx, span := trace.StartSpan(ctx, "vm.ApplyMessageSkipSenderValidation")
+	defer span.End()
+	defer atomic.AddUint64(&StatApplied, 1)
+	msg := cmsg.VMMessage()
+	if span.IsRecordingEvents() {
+		span.AddAttributes(
+			trace.StringAttribute("to", msg.To.String()),
+			trace.Int64Attribute("method", int64(msg.Method)),
+			trace.StringAttribute("value", msg.Value.String()),
+		)
+	}
+
+	if err := checkMessage(msg); err != nil {
+		return nil, err
+	}
+
+	pl := PricelistByEpoch(vm.blockHeight)
+
+	msgGas := pl.OnChainMessage(cmsg.ChainLength())
+	msgGasCost := msgGas.Total()
+	// this should never happen, but is currently still exercised by some tests
+	if msgGasCost > msg.GasLimit {
+		gasOutputs := ZeroGasOutputs()
+		gasOutputs.MinerPenalty = types.BigMul(vm.baseFee, abi.NewTokenAmount(msgGasCost))
+		return &ApplyRet{
+			MessageReceipt: types.MessageReceipt{
+				ExitCode: exitcode.SysErrOutOfGas,
+				GasUsed:  0,
+			},
+			GasCosts: &gasOutputs,
+			Duration: time.Since(start),
+			ActorErr: aerrors.Newf(exitcode.SysErrOutOfGas,
+				"message gas limit does not cover on-chain gas costs"),
+		}, nil
+	}
+
+	st := vm.cstate
+
+	// Skip sender validation - get actor but don't fail if not found
+	fromActor, _ := st.GetActor(msg.From)
+	if fromActor == nil {
+		// Create a minimal synthetic actor for simulation
+		fromActor = &types.Actor{
+			Balance: types.NewInt(0),
+			Nonce:   0,
+		}
+	}
+
+	gascost := types.BigMul(types.NewInt(uint64(msg.GasLimit)), msg.GasFeeCap)
+	// Skip balance check for simulation - allow execution even without sufficient funds
+
+	gasHolder := &types.Actor{Balance: types.NewInt(0)}
+	if err := vm.transferToGasHolder(msg.From, gasHolder, gascost); err != nil {
+		return nil, xerrors.Errorf("failed to withdraw gas funds: %w", err)
+	}
+
+	if err := vm.incrementNonce(msg.From); err != nil {
+		return nil, err
+	}
+
+	if err := st.Snapshot(ctx); err != nil {
+		return nil, xerrors.Errorf("snapshot failed: %w", err)
+	}
+	defer st.ClearSnapshot()
+
+	ret, actorErr, rt := vm.send(ctx, msg, nil, &msgGas, start)
+	if aerrors.IsFatal(actorErr) {
+		return nil, xerrors.Errorf("[from=%s,to=%s,n=%d,m=%d,h=%d] fatal error: %w", msg.From, msg.To, msg.Nonce, msg.Method, vm.blockHeight, actorErr)
+	}
+
+	if actorErr != nil {
+		log.Warnw("Send actor error", "from", msg.From, "to", msg.To, "nonce", msg.Nonce, "method", msg.Method, "height", vm.blockHeight, "error", fmt.Sprintf("%+v", actorErr))
+	}
+
+	if actorErr != nil && len(ret) != 0 {
+		// This should not happen, something is wonky
+		return nil, xerrors.Errorf("message invocation errored, but had a return value anyway: %w", actorErr)
+	}
+
+	if rt == nil {
+		return nil, xerrors.Errorf("send returned nil runtime, send error was: %s", actorErr)
+	}
+
+	if len(ret) != 0 {
+		// safely override actorErr since it must be nil
+		actorErr = rt.chargeGasSafe(rt.Pricelist().OnChainReturnValue(len(ret)))
+		if actorErr != nil {
+			ret = nil
+		}
+	}
+
+	var errcode exitcode.ExitCode
+	var gasUsed int64
+
+	if errcode = aerrors.RetCode(actorErr); errcode != 0 {
+		// revert all state changes since snapshot
+		if err := st.Revert(); err != nil {
+			return nil, xerrors.Errorf("revert state failed: %w", err)
+		}
+	}
+
+	rt.finilizeGasTracing()
+
+	gasUsed = rt.gasUsed
+	if gasUsed < 0 {
+		gasUsed = 0
+	}
+
+	burn, err := vm.ShouldBurn(ctx, st, msg, errcode)
+	if err != nil {
+		return nil, xerrors.Errorf("deciding whether should burn failed: %w", err)
+	}
+
+	gasOutputs := ComputeGasOutputs(gasUsed, msg.GasLimit, vm.baseFee, msg.GasFeeCap, msg.GasPremium, burn)
+
+	if err := vm.transferFromGasHolder(builtin.BurntFundsActorAddr, gasHolder,
+		gasOutputs.BaseFeeBurn); err != nil {
+		return nil, xerrors.Errorf("failed to burn base fee: %w", err)
+	}
+
+	if err := vm.transferFromGasHolder(reward.Address, gasHolder, gasOutputs.MinerTip); err != nil {
+		return nil, xerrors.Errorf("failed to give miner gas reward: %w", err)
+	}
+
+	if err := vm.transferFromGasHolder(builtin.BurntFundsActorAddr, gasHolder,
+		gasOutputs.OverEstimationBurn); err != nil {
+		return nil, xerrors.Errorf("failed to burn overestimation fee: %w", err)
+	}
+
+	// refund unused gas
+	if err := vm.transferFromGasHolder(msg.From, gasHolder, gasOutputs.Refund); err != nil {
+		return nil, xerrors.Errorf("failed to refund gas: %w", err)
+	}
+
+	if types.BigCmp(types.NewInt(0), gasHolder.Balance) != 0 {
+		return nil, xerrors.Errorf("gas handling math is wrong")
+	}
+
+	return &ApplyRet{
+		MessageReceipt: types.MessageReceipt{
+			ExitCode: errcode,
+			Return:   ret,
+			GasUsed:  gasUsed,
+		},
+		ActorErr:       actorErr,
+		ExecutionTrace: rt.executionTrace,
+		GasCosts:       &gasOutputs,
+		Duration:       time.Since(start),
+	}, nil
+}
+
 func (vm *LegacyVM) ShouldBurn(ctx context.Context, st *state.StateTree, msg *types.Message, errcode exitcode.ExitCode) (bool, error) {
 	if vm.networkVersion <= network.Version12 {
 		// Check to see if we should burn funds. We avoid burning on successful

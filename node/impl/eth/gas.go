@@ -206,29 +206,35 @@ func (e *ethGas) EthEstimateGas(ctx context.Context, p jsonrpc.RawParams) (ethty
 		}
 	}
 
+	// First try the standard gas estimation path
 	gassedMsg, err := e.gasApi.GasEstimateMessageGas(ctx, msg, nil, ts.Key())
 	if err != nil {
-		// On failure, GasEstimateMessageGas doesn't actually return the invocation result,
-		// it just returns an error. That means we can't get the revert reason.
-		//
-		// So we re-execute the message with EthCall (well, applyMessage which contains the
-		// guts of EthCall). This will give us an ethereum specific error with revert
-		// information.
-		msg.GasLimit = buildconstants.BlockGasLimit
-		if _, err2 := e.applyMessage(ctx, msg, ts.Key()); err2 != nil {
-			// If err2 is an ExecutionRevertedError, return it
-			var ed *api.ErrExecutionReverted
-			if errors.As(err2, &ed) {
-				return ethtypes.EthUint64(0), err2
+		// Standard path failed - try skip sender validation path as fallback.
+		// This handles cases where the sender is a contract or doesn't exist,
+		// matching Geth's eth_estimateGas behavior.
+		gasLimit, err2 := gasutils.GasEstimateGasLimitSkipSenderValidation(ctx, e.chainStore, e.stateManager, e.messagePool, msg, ts)
+		if err2 != nil {
+			// Both paths failed - try applyMessage to get revert information
+			msg.GasLimit = buildconstants.BlockGasLimit
+			if _, err3 := e.applyMessage(ctx, msg, ts.Key()); err3 != nil {
+				var ed *api.ErrExecutionReverted
+				if errors.As(err3, &ed) {
+					return ethtypes.EthUint64(0), err3
+				}
+				err = err3
 			}
-
-			// Otherwise, return the error from applyMessage with failed to estimate gas
-			err = err2
+			return ethtypes.EthUint64(0), xerrors.Errorf("failed to estimate gas: %w", err)
 		}
 
-		return ethtypes.EthUint64(0), xerrors.Errorf("failed to estimate gas: %w", err)
+		// Skip sender validation path succeeded - apply overestimation
+		gasLimit = int64(float64(gasLimit) * e.messagePool.GetConfig().GasLimitOverestimation)
+		if gasLimit > buildconstants.BlockGasLimit {
+			gasLimit = buildconstants.BlockGasLimit
+		}
+		return ethtypes.EthUint64(gasLimit), nil
 	}
 
+	// Standard path succeeded - use ethGasSearch for accurate estimation
 	expectedGas, err := ethGasSearch(ctx, e.chainStore, e.stateManager, e.messagePool, gassedMsg, ts)
 	if err != nil {
 		return 0, xerrors.Errorf("gas search failed: %w", err)
@@ -283,7 +289,10 @@ func (e *ethGas) applyMessage(ctx context.Context, msg *types.Message, tsk types
 	if err != nil {
 		return nil, xerrors.Errorf("cannot get tipset state: %w", err)
 	}
-	res, err = e.stateManager.ApplyOnStateWithGas(ctx, st, msg, ts)
+	// Use ApplyOnStateWithGasSkipSenderValidation to allow eth_call/eth_estimateGas
+	// to simulate calls from contract addresses or non-existent addresses.
+	// This matches Geth's behavior with SkipAccountChecks for RPC simulation.
+	res, err = e.stateManager.ApplyOnStateWithGasSkipSenderValidation(ctx, st, msg, ts)
 	if err != nil {
 		return nil, xerrors.Errorf("ApplyWithGasOnState failed: %w", err)
 	}

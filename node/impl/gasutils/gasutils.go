@@ -34,6 +34,7 @@ const MaxSpendOnFeeDenom = 100
 type StateManagerAPI interface {
 	ParentState(ts *types.TipSet) (*state.StateTree, error)
 	CallWithGas(ctx context.Context, msg *types.Message, priorMsgs []types.ChainMsg, ts *types.TipSet, applyTsMessages bool) (*api.InvocResult, error)
+	CallWithGasSkipSenderValidation(ctx context.Context, msg *types.Message, priorMsgs []types.ChainMsg, ts *types.TipSet, applyTsMessages bool) (*api.InvocResult, error)
 	ResolveToDeterministicAddress(ctx context.Context, addr address.Address, ts *types.TipSet) (address.Address, error)
 }
 
@@ -144,6 +145,53 @@ func GasEstimateCallWithGas(
 	return res, priorMsgs, ts, nil
 }
 
+// GasEstimateCallWithGasSkipSenderValidation is like GasEstimateCallWithGas but skips sender validation.
+// This allows gas estimation for messages from non-existent addresses, matching Geth's eth_estimateGas behavior.
+func GasEstimateCallWithGasSkipSenderValidation(
+	ctx context.Context,
+	cstore ChainStoreAPI,
+	smgr StateManagerAPI,
+	mpool MessagePoolAPI,
+	msgIn *types.Message,
+	currTs *types.TipSet,
+) (*api.InvocResult, []types.ChainMsg, *types.TipSet, error) {
+	msg := *msgIn
+
+	// Skip resolving sender address since it may not exist on chain
+	pending, ts := mpool.PendingFor(ctx, msgIn.From)
+	priorMsgs := make([]types.ChainMsg, 0, len(pending))
+	for _, m := range pending {
+		if m.Message.Nonce == msg.Nonce {
+			break
+		}
+		priorMsgs = append(priorMsgs, m)
+	}
+
+	applyTsMessages := true
+	if os.Getenv("LOTUS_SKIP_APPLY_TS_MESSAGE_CALL_WITH_GAS") == "1" {
+		applyTsMessages = false
+	}
+
+	// Try calling until we find a height with no migration.
+	var res *api.InvocResult
+	var err error
+	for {
+		res, err = smgr.CallWithGasSkipSenderValidation(ctx, &msg, priorMsgs, ts, applyTsMessages)
+		if err != stmgr.ErrExpensiveFork {
+			break
+		}
+		ts, err = cstore.GetTipSetFromKey(ctx, ts.Parents())
+		if err != nil {
+			return nil, []types.ChainMsg{}, nil, xerrors.Errorf("getting parent tipset: %w", err)
+		}
+	}
+	if err != nil {
+		return nil, []types.ChainMsg{}, nil, xerrors.Errorf("CallWithGasSkipSenderValidation failed: %w", err)
+	}
+
+	return res, priorMsgs, ts, nil
+}
+
 func GasEstimateGasLimit(
 	ctx context.Context,
 	cstore ChainStoreAPI,
@@ -180,6 +228,86 @@ func GasEstimateGasLimit(
 		func() {
 
 			// Bare transfers get about 3x more expensive: https://github.com/filecoin-project/FIPs/blob/master/FIPS/fip-0057.md#product-considerations
+			if msgIn.Method == builtin.MethodSend {
+				transitionalMulti = 3.0
+				return
+			}
+
+			st, err := smgr.ParentState(ts)
+			if err != nil {
+				return
+			}
+			act, err := st.GetActor(msg.To)
+			if err != nil {
+				return
+			}
+
+			if lbuiltin.IsStorageMinerActor(act.Code) {
+				switch msgIn.Method {
+				case 3:
+					transitionalMulti = 1.92
+				case 4:
+					transitionalMulti = 1.72
+				case 6:
+					transitionalMulti = 1.06
+				case 7:
+					transitionalMulti = 1.2
+				case 16:
+					transitionalMulti = 1.19
+				case 18:
+					transitionalMulti = 1.73
+				case 23:
+					transitionalMulti = 1.73
+				case 26:
+					transitionalMulti = 1.15
+				case 27:
+					transitionalMulti = 1.18
+				default:
+				}
+			}
+		}()
+	}
+	ret = (ret * int64(transitionalMulti*1024)) >> 10
+
+	return ret, nil
+}
+
+// GasEstimateGasLimitSkipSenderValidation is like GasEstimateGasLimit but skips sender validation.
+// This allows gas estimation for messages from non-existent addresses, matching Geth's eth_estimateGas behavior.
+func GasEstimateGasLimitSkipSenderValidation(
+	ctx context.Context,
+	cstore ChainStoreAPI,
+	smgr StateManagerAPI,
+	mpool MessagePoolAPI,
+	msgIn *types.Message,
+	currTs *types.TipSet,
+) (int64, error) {
+	msg := *msgIn
+	msg.GasLimit = buildconstants.BlockGasLimit
+	msg.GasFeeCap = big.Zero()
+	msg.GasPremium = big.Zero()
+
+	res, _, ts, err := GasEstimateCallWithGasSkipSenderValidation(ctx, cstore, smgr, mpool, &msg, currTs)
+	if err != nil {
+		return -1, xerrors.Errorf("gas estimation failed: %w", err)
+	}
+
+	if res.MsgRct.ExitCode == exitcode.SysErrOutOfGas {
+		return -1, &api.ErrOutOfGas{}
+	}
+
+	if res.MsgRct.ExitCode != exitcode.Ok {
+		return -1, api.NewErrExecutionRevertedFromResult(res)
+	}
+
+	ret := res.MsgRct.GasUsed
+
+	// Apply the same transitional multiplier as GasEstimateGasLimit
+	transitionalMulti := 1.0
+	// Overestimate gas around the upgrade
+	if ts.Height() <= buildconstants.UpgradeHyggeHeight && (buildconstants.UpgradeHyggeHeight-ts.Height() <= 20) {
+		func() {
+			// Bare transfers get about 3x more expensive
 			if msgIn.Method == builtin.MethodSend {
 				transitionalMulti = 3.0
 				return

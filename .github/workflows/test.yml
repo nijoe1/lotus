@@ -46,13 +46,12 @@ jobs:
           submodules: 'recursive'
           fetch-depth: 0
       - id: fetch_params
-        env:
-          CACHE_KEY: fetch-params-${{ hashFiles('./extern/filecoin-ffi/parameters.json') }}
-          CACHE_PATH: |
-            /var/tmp/filecoin-proof-parameters/
         run: |
-          echo -e "key=$CACHE_KEY" | tee -a $GITHUB_OUTPUT
-          echo -e "path<<EOF\n$CACHE_PATH\nEOF" | tee -a $GITHUB_OUTPUT
+          # Use OS-specific cache key to avoid cross-platform cache conflicts
+          CACHE_KEY="${{ runner.os }}-${{ runner.arch }}-fetch-params-${{ hashFiles('./extern/filecoin-ffi/parameters.json') }}"
+          CACHE_PATH="/var/tmp/filecoin-proof-parameters/"
+          echo "key=$CACHE_KEY" | tee -a $GITHUB_OUTPUT
+          echo "path=$CACHE_PATH" | tee -a $GITHUB_OUTPUT
       - id: make_deps
         env:
           CACHE_KEY: ${{ runner.os }}-${{ runner.arch }}-make-deps-${{ hashFiles('./.git/modules/extern/filecoin-ffi/HEAD') }}-p

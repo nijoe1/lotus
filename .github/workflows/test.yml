@@ -82,8 +82,11 @@ jobs:
       - if: steps.restore_fetch_params.outputs.cache-hit != 'true' || steps.restore_make_deps.outputs.cache-hit != 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          GOCACHE: ${{ runner.temp }}/go-cache-${{ github.run_id }}
         run: FFI_PORTABLE=1 make deps
       - if: steps.restore_fetch_params.outputs.cache-hit != 'true'
+        env:
+          GOCACHE: ${{ runner.temp }}/go-cache-${{ github.run_id }}
         run: make lotus
       - if: steps.restore_fetch_params.outputs.cache-hit != 'true'
         run: ./lotus fetch-params 2048
@@ -171,7 +174,9 @@ jobs:
       # TODO: Install statediff (used to be used for conformance)
       - name: Create temporary directory for reports
         id: reports
-        run: mktemp -d | xargs -0 -I{} echo "path={}" | tee -a $GITHUB_OUTPUT
+        run: |
+          TMPDIR=$(mktemp -d)
+          echo "path=$TMPDIR" | tee -a $GITHUB_OUTPUT
       # TODO: Track coverage (used to be tracked for conformance)
       - name: Run tests
         env:
@@ -201,6 +206,10 @@ jobs:
           # assigns the name and classname attributes to "command-line-arguments". Others get the
           # package name for both.
           # Note: Using sed syntax compatible with both GNU and BSD (macOS) sed
+          if [[ ! -f "$REPORTS_PATH/$NAME.xml" ]]; then
+            echo "No test report found at $REPORTS_PATH/$NAME.xml, skipping modification"
+            exit 0
+          fi
           if [[ "${{ matrix.name }}" == itest-* ]]; then
             PACKAGE_NAME=$(basename "$PACKAGES" .go)
             sed -i.bak 's/ name="command-line-arguments"/ name="itests"/g' "$REPORTS_PATH/$NAME.xml"

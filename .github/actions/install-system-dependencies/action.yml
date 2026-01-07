@@ -15,7 +15,11 @@ runs:
       env:
         HOMEBREW_NO_AUTO_UPDATE: '1'
       run: |
-        brew install hwloc pkg-config
-        echo "CPATH=$(brew --prefix)/include" | tee -a $GITHUB_ENV
-        echo "LIBRARY_PATH=$(brew --prefix)/lib" | tee -a $GITHUB_ENV
+        brew install hwloc pkg-config jq || true
+        # Support both Intel (/usr/local) and Apple Silicon (/opt/homebrew)
+        BREW_PREFIX=$(brew --prefix)
+        echo "CPATH=${BREW_PREFIX}/include" | tee -a $GITHUB_ENV
+        echo "LIBRARY_PATH=${BREW_PREFIX}/lib" | tee -a $GITHUB_ENV
+        echo "CGO_LDFLAGS=-L${BREW_PREFIX}/lib" | tee -a $GITHUB_ENV
+        echo "CGO_CFLAGS=-I${BREW_PREFIX}/include" | tee -a $GITHUB_ENV
       shell: bash

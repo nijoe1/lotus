@@ -94,6 +94,11 @@ func TestEthCallSkipSender(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "FromNonExistent",
+			call:    ethtypes.EthCall{From: &nonExistent, To: &env.eoaAddr},
+			wantErr: false,
+		},
+		{
 			name:    "FromNonExistentWithGasPrice",
 			call:    ethtypes.EthCall{From: &nonExistent, To: &env.eoaAddr, GasPrice: gasPrice},
 			wantErr: false,

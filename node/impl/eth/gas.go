@@ -233,24 +233,6 @@ func (e *ethGas) EthEstimateGas(ctx context.Context, p jsonrpc.RawParams) (ethty
 			return ethtypes.EthUint64(0), xerrors.Errorf("failed to estimate gas: %w", err)
 		}
 
-		hasGasPrice := params.Tx.GasPrice.Int != nil && params.Tx.GasPrice.Int.Sign() > 0
-		hasValue := !msg.Value.NilOrZero()
-		if hasGasPrice || hasValue {
-			actor, loadErr := e.stateManager.LoadActor(ctx, msg.From, ts)
-			if loadErr != nil {
-				if errors.Is(loadErr, types.ErrActorNotFound) {
-					return ethtypes.EthUint64(0), xerrors.New("insufficient funds for gas * price + value")
-				}
-				return ethtypes.EthUint64(0), xerrors.Errorf("failed to load sender actor: %w", loadErr)
-			}
-			if hasValue && types.BigCmp(actor.Balance, msg.Value) < 0 {
-				return ethtypes.EthUint64(0), xerrors.New("insufficient funds for transfer")
-			}
-			if hasGasPrice && actor.Balance.NilOrZero() {
-				return ethtypes.EthUint64(0), xerrors.New("insufficient funds for gas * price + value")
-			}
-		}
-
 		// Sender validation failed - try skip sender validation path as fallback.
 		// This handles cases where the sender is a contract or doesn't exist,
 		// matching Geth's eth_estimateGas behavior.

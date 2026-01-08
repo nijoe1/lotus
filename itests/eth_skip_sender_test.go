@@ -250,9 +250,10 @@ func TestEthEstimateGasSkipSender(t *testing.T) {
 		{
 			name:    "FromNonExistentWithGasPrice",
 			call:    ethtypes.EthCall{From: &nonExistent, To: &env.eoaAddr, GasPrice: gasPrice},
-			wantErr: true,
-			check: func(t *testing.T, _ ethtypes.EthUint64, err error) {
-				require.Contains(t, strings.ToLower(err.Error()), "insufficient")
+			wantErr: false,
+			check: func(t *testing.T, gas ethtypes.EthUint64, _ error) {
+				require.GreaterOrEqual(t, uint64(gas), minGas, "gas should be at least minimum transfer gas")
+				require.Less(t, uint64(gas), maxGas, "gas should not overflow")
 			},
 		},
 		{

@@ -585,14 +585,12 @@ func (vm *LegacyVM) applyMessageInternal(ctx context.Context, cmsg types.ChainMs
 	}
 
 	gasHolder := &types.Actor{Balance: types.NewInt(0)}
-	if !skipSenderValidation {
-		if err := vm.transferToGasHolder(msg.From, gasHolder, gascost); err != nil {
-			return nil, xerrors.Errorf("failed to withdraw gas funds: %w", err)
-		}
+	if err := vm.transferToGasHolder(msg.From, gasHolder, gascost); err != nil {
+		return nil, xerrors.Errorf("failed to withdraw gas funds: %w", err)
+	}
 
-		if err := vm.incrementNonce(msg.From); err != nil {
-			return nil, err
-		}
+	if err := vm.incrementNonce(msg.From); err != nil {
+		return nil, err
 	}
 
 	if err := st.Snapshot(ctx); err != nil {
@@ -650,29 +648,27 @@ func (vm *LegacyVM) applyMessageInternal(ctx context.Context, cmsg types.ChainMs
 
 	gasOutputs := ComputeGasOutputs(gasUsed, msg.GasLimit, vm.baseFee, msg.GasFeeCap, msg.GasPremium, burn)
 
-	if !skipSenderValidation {
-		if err := vm.transferFromGasHolder(builtin.BurntFundsActorAddr, gasHolder,
-			gasOutputs.BaseFeeBurn); err != nil {
-			return nil, xerrors.Errorf("failed to burn base fee: %w", err)
-		}
+	if err := vm.transferFromGasHolder(builtin.BurntFundsActorAddr, gasHolder,
+		gasOutputs.BaseFeeBurn); err != nil {
+		return nil, xerrors.Errorf("failed to burn base fee: %w", err)
+	}
 
-		if err := vm.transferFromGasHolder(reward.Address, gasHolder, gasOutputs.MinerTip); err != nil {
-			return nil, xerrors.Errorf("failed to give miner gas reward: %w", err)
-		}
+	if err := vm.transferFromGasHolder(reward.Address, gasHolder, gasOutputs.MinerTip); err != nil {
+		return nil, xerrors.Errorf("failed to give miner gas reward: %w", err)
+	}
 
-		if err := vm.transferFromGasHolder(builtin.BurntFundsActorAddr, gasHolder,
-			gasOutputs.OverEstimationBurn); err != nil {
-			return nil, xerrors.Errorf("failed to burn overestimation fee: %w", err)
-		}
+	if err := vm.transferFromGasHolder(builtin.BurntFundsActorAddr, gasHolder,
+		gasOutputs.OverEstimationBurn); err != nil {
+		return nil, xerrors.Errorf("failed to burn overestimation fee: %w", err)
+	}
 
-		// refund unused gas
-		if err := vm.transferFromGasHolder(msg.From, gasHolder, gasOutputs.Refund); err != nil {
-			return nil, xerrors.Errorf("failed to refund gas: %w", err)
-		}
+	// refund unused gas
+	if err := vm.transferFromGasHolder(msg.From, gasHolder, gasOutputs.Refund); err != nil {
+		return nil, xerrors.Errorf("failed to refund gas: %w", err)
+	}
 
-		if types.BigCmp(types.NewInt(0), gasHolder.Balance) != 0 {
-			return nil, xerrors.Errorf("gas handling math is wrong")
-		}
+	if types.BigCmp(types.NewInt(0), gasHolder.Balance) != 0 {
+		return nil, xerrors.Errorf("gas handling math is wrong")
 	}
 
 	return &ApplyRet{

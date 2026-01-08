@@ -208,6 +208,7 @@ func TestEthEstimateGasSkipSender(t *testing.T) {
 
 	nonExistent := nonExistentAddr(0x02)
 	blkParam := ethtypes.NewEthBlockNumberOrHashFromPredefined("latest")
+	gasPrice := ethtypes.EthBigInt(types.NewInt(1000000000))
 
 	// Deploy Errors contract for revert test
 	_, errorsFilAddr := env.client.EVM().DeployContractFromFilename(env.ctx, "contracts/Errors.hex")
@@ -244,6 +245,14 @@ func TestEthEstimateGasSkipSender(t *testing.T) {
 			check: func(t *testing.T, gas ethtypes.EthUint64, _ error) {
 				require.GreaterOrEqual(t, uint64(gas), minGas, "gas should be at least minimum transfer gas")
 				require.Less(t, uint64(gas), maxGas, "gas should not overflow")
+			},
+		},
+		{
+			name:    "FromNonExistentWithGasPrice",
+			call:    ethtypes.EthCall{From: &nonExistent, To: &env.eoaAddr, GasPrice: gasPrice},
+			wantErr: true,
+			check: func(t *testing.T, _ ethtypes.EthUint64, err error) {
+				require.Contains(t, strings.ToLower(err.Error()), "insufficient")
 			},
 		},
 		{

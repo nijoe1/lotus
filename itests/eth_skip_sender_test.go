@@ -73,6 +73,8 @@ func TestEthCallSkipSender(t *testing.T) {
 	nonExistent := nonExistentAddr(0x01)
 	blkParam := ethtypes.NewEthBlockNumberOrHashFromPredefined("latest")
 
+	gasPrice := ethtypes.EthBigInt(types.NewInt(1000000000))
+
 	// Deploy Errors contract for revert test
 	_, errorsFilAddr := env.client.EVM().DeployContractFromFilename(env.ctx, "contracts/Errors.hex")
 	errorsActor, err := env.client.StateGetActor(env.ctx, errorsFilAddr, types.EmptyTSK)
@@ -92,8 +94,8 @@ func TestEthCallSkipSender(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "FromNonExistent",
-			call:    ethtypes.EthCall{From: &nonExistent, To: &env.eoaAddr},
+			name:    "FromNonExistentWithGasPrice",
+			call:    ethtypes.EthCall{From: &nonExistent, To: &env.eoaAddr, GasPrice: gasPrice},
 			wantErr: false,
 		},
 		{
@@ -107,8 +109,13 @@ func TestEthCallSkipSender(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "ValueNoBalance",
+			name:    "ValueUnderBalance",
 			call:    ethtypes.EthCall{From: &nonExistent, To: &env.eoaAddr, Value: ethtypes.EthBigInt(types.FromFil(1))},
+			wantErr: false,
+		},
+		{
+			name:    "ValueOverBalance",
+			call:    ethtypes.EthCall{From: &nonExistent, To: &env.eoaAddr, Value: ethtypes.EthBigInt(types.FromFil(200))},
 			wantErr: true,
 			check: func(t *testing.T, _ ethtypes.EthBytes, err error) {
 				require.Contains(t, strings.ToLower(err.Error()), "insufficient")

@@ -101,7 +101,10 @@ func TestEthCallSkipSender(t *testing.T) {
 		{
 			name:    "FromNonExistentWithGasPrice",
 			call:    ethtypes.EthCall{From: &nonExistent, To: &env.eoaAddr, GasPrice: gasPrice},
-			wantErr: false,
+			wantErr: true,
+			check: func(t *testing.T, _ ethtypes.EthBytes, err error) {
+				require.Contains(t, strings.ToLower(err.Error()), "insufficient")
+			},
 		},
 		{
 			name:    "FromEOA",
@@ -114,9 +117,12 @@ func TestEthCallSkipSender(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "ValueUnderBalance",
+			name:    "ValueWithNoBalance",
 			call:    ethtypes.EthCall{From: &nonExistent, To: &env.eoaAddr, Value: ethtypes.EthBigInt(types.FromFil(1))},
-			wantErr: false,
+			wantErr: true,
+			check: func(t *testing.T, _ ethtypes.EthBytes, err error) {
+				require.Contains(t, strings.ToLower(err.Error()), "insufficient")
+			},
 		},
 		{
 			name:    "ValueOverBalance",

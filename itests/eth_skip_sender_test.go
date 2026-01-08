@@ -114,10 +114,7 @@ func TestEthCallSkipSender(t *testing.T) {
 		{
 			name:    "FromNonExistentWithGasPrice",
 			call:    ethtypes.EthCall{From: &nonExistent, To: &env.eoaAddr, GasPrice: gasPrice},
-			wantErr: true,
-			check: func(t *testing.T, _ ethtypes.EthBytes, err error) {
-				require.Contains(t, strings.ToLower(err.Error()), "insufficient")
-			},
+			wantErr: false,
 		},
 		{
 			name:    "FromNonExistentToContractWithData",

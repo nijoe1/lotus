@@ -127,6 +127,14 @@ func TestEthCallSkipSender(t *testing.T) {
 			},
 		},
 		{
+			name:    "FromNonExistentWithValue",
+			call:    ethtypes.EthCall{From: &nonExistent, To: &env.eoaAddr, Value: ethtypes.EthBigInt(types.FromFil(1))},
+			wantErr: true,
+			check: func(t *testing.T, _ ethtypes.EthBytes, err error) {
+				require.Contains(t, strings.ToLower(err.Error()), "insufficient")
+			},
+		},
+		{
 			name:    "FromEOA",
 			call:    ethtypes.EthCall{From: &env.eoaAddr, To: &env.eoaAddr2},
 			wantErr: false,
@@ -137,16 +145,8 @@ func TestEthCallSkipSender(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "ValueWithNoBalance",
-			call:    ethtypes.EthCall{From: &nonExistent, To: &env.eoaAddr, Value: ethtypes.EthBigInt(types.FromFil(1))},
-			wantErr: true,
-			check: func(t *testing.T, _ ethtypes.EthBytes, err error) {
-				require.Contains(t, strings.ToLower(err.Error()), "insufficient")
-			},
-		},
-		{
 			name:    "ValueOverBalance",
-			call:    ethtypes.EthCall{From: &nonExistent, To: &env.eoaAddr, Value: ethtypes.EthBigInt(types.FromFil(200))},
+			call:    ethtypes.EthCall{From: &env.eoaAddr, To: &nonExistent, Value: ethtypes.EthBigInt(types.FromFil(11))},
 			wantErr: true,
 			check: func(t *testing.T, _ ethtypes.EthBytes, err error) {
 				require.Contains(t, strings.ToLower(err.Error()), "insufficient")

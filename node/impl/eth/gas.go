@@ -221,7 +221,7 @@ func (e *ethGas) EthEstimateGas(ctx context.Context, p jsonrpc.RawParams) (ethty
 		var senderErr *api.ErrSenderValidationFailed
 		var execErr *api.ErrExecutionReverted
 		isSenderValidationError := errors.As(err, &senderErr) ||
-			(errors.As(err, &execErr) && strings.Contains(execErr.Message, "SysErrSenderInvalid"))
+			(errors.As(err, &execErr) && (execErr.ExitCode == exitcode.SysErrSenderInvalid || strings.Contains(execErr.Message, "SysErrSenderInvalid")))
 
 		if !isSenderValidationError {
 			// Not a sender validation error - check for other execution reverts.
@@ -340,7 +340,7 @@ func (e *ethGas) applyMessage(ctx context.Context, msg *types.Message, tsk types
 		var senderErr *api.ErrSenderValidationFailed
 		var execErr *api.ErrExecutionReverted
 		needsSkipSender = errors.As(err, &senderErr) ||
-			(errors.As(err, &execErr) && strings.Contains(execErr.Message, "SysErrSenderInvalid"))
+			(errors.As(err, &execErr) && (execErr.ExitCode == exitcode.SysErrSenderInvalid || strings.Contains(execErr.Message, "SysErrSenderInvalid")))
 		if !needsSkipSender {
 			// Not a sender validation error - return the original error
 			return nil, xerrors.Errorf("ApplyOnStateWithGas failed: %w", err)

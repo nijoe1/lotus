@@ -253,7 +253,7 @@ func (sm *StateManager) callInternal(ctx context.Context, msg *types.Message, pr
 		// When skipping sender validation (for eth_call/eth_estimateGas simulation),
 		// create a synthetic actor if the sender doesn't exist. This allows simulating
 		// calls from contract addresses or non-existent addresses, matching Geth's behavior.
-		fromActor, stateCid, vmi, err = sm.createSyntheticSenderActor(ctx, stTree, msg.From, ts, nvGetter, vmopt)
+		fromActor, stateCid, vmi, err = sm.createSyntheticSenderActor(ctx, msg.From, ts, vmopt)
 		if err != nil {
 			return nil, err
 		}
@@ -388,10 +388,8 @@ func (sm *StateManager) Replay(ctx context.Context, ts *types.TipSet, mcid cid.C
 //   - Balance: 0 (value transfers will fail as expected)
 func (sm *StateManager) createSyntheticSenderActor(
 	ctx context.Context,
-	stTree *state.StateTree,
 	fromAddr address.Address,
 	ts *types.TipSet,
-	nvGetter rand.NetworkVersionGetter,
 	vmopt *vm.VMOpts,
 ) (*types.Actor, cid.Cid, vm.Interface, error) {
 	log.Debugw("creating synthetic sender actor for simulation via implicit messages",
@@ -483,4 +481,3 @@ func (sm *StateManager) createSyntheticSenderActor(
 
 	return fromActor, newStateCid, vmi, nil
 }
-
